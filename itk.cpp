@@ -133,7 +133,7 @@ int main (int argc, char * argv[]) {
     optimizer->SetLearningRate(0.1);
     optimizer->SetGradientMagnitudeTolerance(1e-5);
     optimizer->SetMinimumStepLength(1e-5);
-    optimizer->SetNumberOfIterations(200);
+    optimizer->SetNumberOfIterations(500);
 
     auto observer = CommandIterationUpdate::New();
     optimizer->AddObserver(itk::IterationEvent(), observer);
