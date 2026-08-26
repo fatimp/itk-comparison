@@ -1,2 +1,2 @@
-Программа совмещения картинок пористых сред с помощью ITK. Необходима
-для сравнения с soil-align для статьи (которая никогда не выйдет).
+A program for our paper on 3D image registration. This is for
+comparison of out method with ITK.
