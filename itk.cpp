@@ -1,8 +1,9 @@
+#include <itkMattesMutualInformationImageToImageMetricv4.h>
+//#include <itkMeanSquaresImageToImageMetricv4.h>
+#include <itkNormalizeImageFilter.h>
 #include <itkImageRegistrationMethodv4.h>
 #include <itkEuler3DTransform.h>
-#include <itkMeanSquaresImageToImageMetricv4.h>
 #include <itkRegularStepGradientDescentOptimizerv4.h>
-#include <itkNormalizeImageFilter.h>
 #include <itkImageFileReader.h>
 #include <itkImageFileWriter.h>
 #include <itkCenteredTransformInitializer.h>
@@ -37,6 +38,7 @@ public:
 
         std::cout << optimizer->GetCurrentIteration() << " " << optimizer->GetValue() << std::endl;
         std::cout << optimizer->GetGradient() << std::endl;
+        std::cout << optimizer->GetScales() << std::endl;
         std::cout << optimizer->GetCurrentPosition() << std::endl;
     }
 };
@@ -56,13 +58,22 @@ int main (int argc, char * argv[]) {
 
     using FixedImageType = itk::Image<PixelType, Dimension>;
     using MovingImageType = itk::Image<PixelType, Dimension>;
-    using TransformType = itk::Euler3DTransform<double>;
+    using TransformType = itk::Euler3DTransform<double>; // rotation + translation
 
     using OptimizerType = itk::RegularStepGradientDescentOptimizerv4<double>;
+    /*
+     * Mean Squares is also a good choise for images with same pixel
+     * intensity as in the first testing group. But because the mutual
+     * information is a more common choice we use it.
+     */
+    //using MetricType =
+    //    itk::MeanSquaresImageToImageMetricv4<FixedImageType, MovingImageType>;
     using MetricType =
-        itk::MeanSquaresImageToImageMetricv4<FixedImageType, MovingImageType>;
+        itk::MattesMutualInformationImageToImageMetricv4<FixedImageType, MovingImageType>;
     using RegistrationType = itk::
         ImageRegistrationMethodv4<FixedImageType, MovingImageType, TransformType>;
+    using NormalizerTypeFixed  = itk::NormalizeImageFilter<FixedImageType, FixedImageType>;
+    using NormalizerTypeMoving = itk::NormalizeImageFilter<MovingImageType, MovingImageType>;
 
     auto metric = MetricType::New();
     auto optimizer = OptimizerType::New();
@@ -79,9 +90,20 @@ int main (int argc, char * argv[]) {
     fixedImageReader->SetFileName(argv[1]);
     movingImageReader->SetFileName(argv[2]);
 
-    registration->SetFixedImage(fixedImageReader->GetOutput());
-    registration->SetMovingImage(movingImageReader->GetOutput());
+    /*
+     * Normalize pixel intensities. Again, for the first group of
+     * testing images this step can be omitted, but it is a general
+     * practice to do normalization.
+     */
+    auto fixedNormalizer = NormalizerTypeFixed::New();
+    auto movingNormalizer = NormalizerTypeFixed::New();
+    fixedNormalizer->SetInput(fixedImageReader->GetOutput());
+    movingNormalizer->SetInput(movingImageReader->GetOutput());
 
+    registration->SetFixedImage(fixedNormalizer->GetOutput());
+    registration->SetMovingImage(movingNormalizer->GetOutput());
+
+    // Rotation is around center of the image.
     using TransformInitializerType =
         itk::CenteredTransformInitializer<TransformType,
                                           FixedImageType,
@@ -90,44 +112,50 @@ int main (int argc, char * argv[]) {
     initializer->SetTransform(transform);
     initializer->SetFixedImage(fixedImageReader->GetOutput());
     initializer->SetMovingImage(movingImageReader->GetOutput());
-    initializer->MomentsOn();
+    initializer->GeometryOn();
     initializer->InitializeTransform();
 
     registration->SetInitialTransform(transform);
     registration->InPlaceOn();
 
+    /*
+     * Use scales estimator to adjust learning rate for rotation and
+     * translation parameters.
+     */
     using ScalesEstimatorType =
         itk::RegistrationParameterScalesFromPhysicalShift<MetricType>;
     auto scalesEstimator = ScalesEstimatorType::New();
     scalesEstimator->SetMetric(metric);
     scalesEstimator->SetTransformForward(true);
     optimizer->SetScalesEstimator(scalesEstimator);
-    optimizer->SetDoEstimateLearningRateOnce(true);
-    optimizer->SetDoEstimateLearningRateAtEachIteration(false);
-    optimizer->SetLearningRate(1.0);
-    optimizer->SetMinimumStepLength(0.00001);
-    optimizer->SetNumberOfIterations(100);
+    optimizer->SetDoEstimateLearningRateOnce(false);
+    optimizer->SetDoEstimateLearningRateAtEachIteration(true);
+    optimizer->SetLearningRate(0.1);
+    optimizer->SetGradientMagnitudeTolerance(1e-5);
+    optimizer->SetMinimumStepLength(1e-5);
+    optimizer->SetNumberOfIterations(200);
 
     auto observer = CommandIterationUpdate::New();
     optimizer->AddObserver(itk::IterationEvent(), observer);
 
-    // constexpr unsigned int numberOfLevels = 3;
+    constexpr unsigned int numberOfLevels = 3;
 
-    // RegistrationType::ShrinkFactorsArrayType shrinkFactorsPerLevel;
-    // shrinkFactorsPerLevel.SetSize(3);
-    // shrinkFactorsPerLevel[0] = 4;
-    // shrinkFactorsPerLevel[1] = 2;
-    // shrinkFactorsPerLevel[2] = 1;
+    // Use multiresolution pyramid with 3 levels
+    RegistrationType::ShrinkFactorsArrayType shrinkFactorsPerLevel;
+    shrinkFactorsPerLevel.SetSize(3);
+    shrinkFactorsPerLevel[0] = 4;
+    shrinkFactorsPerLevel[1] = 2;
+    shrinkFactorsPerLevel[2] = 1;
 
-    // RegistrationType::SmoothingSigmasArrayType smoothingSigmasPerLevel;
-    // smoothingSigmasPerLevel.SetSize(3);
-    // smoothingSigmasPerLevel[0] = 2;
-    // smoothingSigmasPerLevel[1] = 1;
-    // smoothingSigmasPerLevel[2] = 0;
+    RegistrationType::SmoothingSigmasArrayType smoothingSigmasPerLevel;
+    smoothingSigmasPerLevel.SetSize(3);
+    smoothingSigmasPerLevel[0] = 2;
+    smoothingSigmasPerLevel[1] = 1;
+    smoothingSigmasPerLevel[2] = 0;
  
-    // registration->SetNumberOfLevels(numberOfLevels);
-    // registration->SetSmoothingSigmasPerLevel(smoothingSigmasPerLevel);
-    // registration->SetShrinkFactorsPerLevel(shrinkFactorsPerLevel);
+    registration->SetNumberOfLevels(numberOfLevels);
+    registration->SetSmoothingSigmasPerLevel(smoothingSigmasPerLevel);
+    registration->SetShrinkFactorsPerLevel(shrinkFactorsPerLevel);
 
     try {
         registration->Update();
