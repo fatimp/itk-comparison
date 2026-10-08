@@ -12,6 +12,8 @@
 #include <itkTransformFileWriter.h>
 #include <itkCommand.h>
 
+using PixelType = float;
+
 class CommandIterationUpdate : public itk::Command {
 public:
     using Self = CommandIterationUpdate;
@@ -23,7 +25,7 @@ protected:
     CommandIterationUpdate() = default;
 
 public:
-    using OptimizerType = itk::RegularStepGradientDescentOptimizerv4<double>;
+    using OptimizerType = itk::RegularStepGradientDescentOptimizerv4<PixelType>;
     using OptimizerPointer = const OptimizerType *;
 
     void Execute(itk::Object * caller, const itk::EventObject & event) override {
@@ -54,13 +56,12 @@ int main (int argc, char * argv[]) {
     itk::MultiThreaderBase::SetGlobalDefaultNumberOfThreads(4);
 
     constexpr unsigned int Dimension = 3;
-    using PixelType = float;
 
     using FixedImageType = itk::Image<PixelType, Dimension>;
     using MovingImageType = itk::Image<PixelType, Dimension>;
-    using TransformType = itk::Euler3DTransform<double>; // rotation + translation
+    using TransformType = itk::Euler3DTransform<PixelType>; // rotation + translation
 
-    using OptimizerType = itk::RegularStepGradientDescentOptimizerv4<double>;
+    using OptimizerType = itk::RegularStepGradientDescentOptimizerv4<PixelType>;
     /*
      * Mean Squares is also a good choise for images with same pixel
      * intensity as in the first testing group. But because the mutual
@@ -69,7 +70,7 @@ int main (int argc, char * argv[]) {
     //using MetricType =
     //    itk::MeanSquaresImageToImageMetricv4<FixedImageType, MovingImageType>;
     using MetricType =
-        itk::MattesMutualInformationImageToImageMetricv4<FixedImageType, MovingImageType>;
+        itk::MattesMutualInformationImageToImageMetricv4<FixedImageType, MovingImageType, FixedImageType, PixelType>;
     using RegistrationType = itk::
         ImageRegistrationMethodv4<FixedImageType, MovingImageType, TransformType>;
     using NormalizerTypeFixed  = itk::NormalizeImageFilter<FixedImageType, FixedImageType>;
@@ -169,7 +170,7 @@ int main (int argc, char * argv[]) {
     }
 
     using ResampleFilterType =
-        itk::ResampleImageFilter<MovingImageType, FixedImageType>;
+        itk::ResampleImageFilter<MovingImageType, FixedImageType, PixelType>;
     auto resample = ResampleFilterType::New();
 
     auto resultTransform = registration->GetTransform();
