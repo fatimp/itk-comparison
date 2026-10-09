@@ -45,6 +45,24 @@ public:
     }
 };
 
+template<typename T>
+typename T::Pointer loadImage (std::string name) {
+    using ImageReaderType = itk::ImageFileReader<T>;
+    auto imageReader = ImageReaderType::New();
+    imageReader->SetFileName(name);
+
+    /*
+     * Normalize pixel intensities. Again, for the first group of
+     * testing images this step can be omitted, but it is a general
+     * practice to do normalization.
+     */
+    using NormalizerType = itk::NormalizeImageFilter<T, T>;
+    auto normalizer = NormalizerType::New();
+    normalizer->SetInput(imageReader->GetOutput());
+    normalizer->Update();
+    return normalizer->GetOutput();
+}
+
 int main (int argc, char * argv[]) {
     if (argc < 5) {
         std::cerr << "Missing Parameters " << std::endl;
@@ -73,36 +91,20 @@ int main (int argc, char * argv[]) {
         itk::MattesMutualInformationImageToImageMetricv4<FixedImageType, MovingImageType, FixedImageType, PixelType>;
     using RegistrationType = itk::
         ImageRegistrationMethodv4<FixedImageType, MovingImageType, TransformType>;
-    using NormalizerTypeFixed  = itk::NormalizeImageFilter<FixedImageType, FixedImageType>;
-    using NormalizerTypeMoving = itk::NormalizeImageFilter<MovingImageType, MovingImageType>;
 
     auto metric = MetricType::New();
     auto optimizer = OptimizerType::New();
     auto registration = RegistrationType::New();
 
+    auto fixedImage  = loadImage<FixedImageType>(argv[1]);
+    auto movingImage = loadImage<FixedImageType>(argv[2]);
+
     registration->SetMetric(metric);
     registration->SetOptimizer(optimizer);
     auto transform = TransformType::New();
 
-    using FixedImageReaderType = itk::ImageFileReader<FixedImageType>;
-    using MovingImageReaderType = itk::ImageFileReader<MovingImageType>;
-    auto fixedImageReader = FixedImageReaderType::New();
-    auto movingImageReader = MovingImageReaderType::New();
-    fixedImageReader->SetFileName(argv[1]);
-    movingImageReader->SetFileName(argv[2]);
-
-    /*
-     * Normalize pixel intensities. Again, for the first group of
-     * testing images this step can be omitted, but it is a general
-     * practice to do normalization.
-     */
-    auto fixedNormalizer = NormalizerTypeFixed::New();
-    auto movingNormalizer = NormalizerTypeFixed::New();
-    fixedNormalizer->SetInput(fixedImageReader->GetOutput());
-    movingNormalizer->SetInput(movingImageReader->GetOutput());
-
-    registration->SetFixedImage(fixedNormalizer->GetOutput());
-    registration->SetMovingImage(movingNormalizer->GetOutput());
+    registration->SetFixedImage(fixedImage);
+    registration->SetMovingImage(movingImage);
 
     // Rotation is around center of the image.
     using TransformInitializerType =
@@ -111,8 +113,8 @@ int main (int argc, char * argv[]) {
                                           MovingImageType>;
     auto initializer = TransformInitializerType::New();
     initializer->SetTransform(transform);
-    initializer->SetFixedImage(fixedImageReader->GetOutput());
-    initializer->SetMovingImage(movingImageReader->GetOutput());
+    initializer->SetFixedImage(fixedImage);
+    initializer->SetMovingImage(movingImage);
     initializer->GeometryOn();
     initializer->InitializeTransform();
 
@@ -143,13 +145,13 @@ int main (int argc, char * argv[]) {
 
     // Use multiresolution pyramid with 3 levels
     RegistrationType::ShrinkFactorsArrayType shrinkFactorsPerLevel;
-    shrinkFactorsPerLevel.SetSize(3);
+    shrinkFactorsPerLevel.SetSize(numberOfLevels);
     shrinkFactorsPerLevel[0] = 4;
     shrinkFactorsPerLevel[1] = 2;
     shrinkFactorsPerLevel[2] = 1;
 
     RegistrationType::SmoothingSigmasArrayType smoothingSigmasPerLevel;
-    smoothingSigmasPerLevel.SetSize(3);
+    smoothingSigmasPerLevel.SetSize(numberOfLevels);
     smoothingSigmasPerLevel[0] = 2;
     smoothingSigmasPerLevel[1] = 1;
     smoothingSigmasPerLevel[2] = 0;
@@ -175,9 +177,8 @@ int main (int argc, char * argv[]) {
 
     auto resultTransform = registration->GetTransform();
     resample->SetTransform(resultTransform);
-    resample->SetInput(movingImageReader->GetOutput());
+    resample->SetInput(movingImage);
  
-    FixedImageType::Pointer fixedImage = fixedImageReader->GetOutput();
     resample->SetSize(fixedImage->GetLargestPossibleRegion().GetSize());
     resample->SetOutputOrigin(fixedImage->GetOrigin());
     resample->SetOutputSpacing(fixedImage->GetSpacing());
