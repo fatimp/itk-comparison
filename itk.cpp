@@ -1,11 +1,10 @@
 #include <itkMattesMutualInformationImageToImageMetricv4.h>
 #include <itkImageRegistrationMethodv4.h>
 #include <itkEuler3DTransform.h>
-#include <itkRegularStepGradientDescentOptimizerv4.h>
+#include <itkAmoebaOptimizerv4.h>
 #include <itkImageFileReader.h>
 #include <itkImageFileWriter.h>
 #include <itkCenteredTransformInitializer.h>
-#include <itkRegistrationParameterScalesFromPhysicalShift.h>
 #include <itkMultiThreaderBase.h>
 #include <itkTransformFileWriter.h>
 #include <itkCommand.h>
@@ -22,7 +21,7 @@ protected:
     CommandIterationUpdate() = default;
 
 public:
-    using OptimizerType = itk::RegularStepGradientDescentOptimizerv4<PixelType>;
+    using OptimizerType = itk::AmoebaOptimizerv4;
     using OptimizerPointer = const OptimizerType *;
 
     void Execute(itk::Object * caller, const itk::EventObject & event) override {
@@ -36,8 +35,6 @@ public:
         }
 
         std::cout << optimizer->GetCurrentIteration() << " " << optimizer->GetValue() << std::endl;
-        std::cout << optimizer->GetGradient() << std::endl;
-        std::cout << optimizer->GetScales() << std::endl;
         std::cout << optimizer->GetCurrentPosition() << std::endl;
     }
 };
@@ -54,15 +51,13 @@ typename T::Pointer loadImage (std::string name) {
 template<typename TransformType, typename ImageType>
 typename TransformType::ConstPointer registerImages(ImageType *fixed, ImageType *moving) {
     using PixelType = typename ImageType::PixelType;
-    using OptimizerType = itk::RegularStepGradientDescentOptimizerv4<PixelType>;
+    using OptimizerType = itk::AmoebaOptimizerv4;
     using MetricType =
         itk::MattesMutualInformationImageToImageMetricv4<ImageType, ImageType, ImageType, PixelType>;
     using RegistrationType = itk::
         ImageRegistrationMethodv4<ImageType, ImageType, TransformType>;
     using TransformInitializerType =
         itk::CenteredTransformInitializer<TransformType, ImageType, ImageType>;
-    using ScalesEstimatorType =
-        itk::RegistrationParameterScalesFromPhysicalShift<MetricType>;
 
     auto metric = MetricType::New();
     auto optimizer = OptimizerType::New();
@@ -90,20 +85,18 @@ typename TransformType::ConstPointer registerImages(ImageType *fixed, ImageType 
     registration->SetInitialTransform(transform);
     registration->InPlaceOn();
 
-    /*
-     * Use scales estimator to adjust learning rate for rotation and
-     * translation parameters.
-     */
-    auto scalesEstimator = ScalesEstimatorType::New();
-    scalesEstimator->SetMetric(metric);
-    scalesEstimator->SetTransformForward(true);
-    optimizer->SetScalesEstimator(scalesEstimator);
-    optimizer->SetDoEstimateLearningRateOnce(false);
-    optimizer->SetDoEstimateLearningRateAtEachIteration(true);
-    optimizer->SetLearningRate(0.1);
-    optimizer->SetGradientMagnitudeTolerance(1e-5);
-    optimizer->SetMinimumStepLength(1e-5);
-    optimizer->SetNumberOfIterations(500);
+    optimizer->SetNumberOfIterations(1000);
+    OptimizerType::ParametersType simplexDelta;
+    simplexDelta.SetSize(6);
+    simplexDelta[0] = 0.1;
+    simplexDelta[1] = 0.1;
+    simplexDelta[2] = 0.1;
+    simplexDelta[3] = 10;
+    simplexDelta[4] = 10;
+    simplexDelta[5] = 10;
+    optimizer->SetInitialSimplexDelta(simplexDelta);
+    optimizer->SetParametersConvergenceTolerance (1e-3);
+    optimizer->SetFunctionConvergenceTolerance (1e-3);
 
     auto observer = CommandIterationUpdate<PixelType>::New();
     optimizer->AddObserver(itk::IterationEvent(), observer);
@@ -145,7 +138,7 @@ int main (int argc, char * argv[]) {
     itk::MultiThreaderBase::SetGlobalDefaultNumberOfThreads(4);
 
     constexpr unsigned int Dimension = 3;
-    using PixelType = float;
+    using PixelType = double;
     using ImageType = itk::Image<PixelType, Dimension>;
     using TransformType = itk::Euler3DTransform<PixelType>;
     using ResampleFilterType =
